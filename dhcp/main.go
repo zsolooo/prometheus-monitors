@@ -5,6 +5,7 @@ import (
 	"code.google.com/p/gopacket/layers"
 	"code.google.com/p/gopacket/pcap"
 	"flag"
+	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	"log"
 	"net/http"
@@ -22,13 +23,18 @@ const (
 	DHCPINFORM
 )
 
+const (
+	OPTION_SUBNETMASK = 1
+	OPTION_ROUTER     = 3
+)
+
 var addr = flag.String("listen-address", ":8080", "The address to listen on for HTTP requests.")
 var iface = flag.String("interface", "eth0", "The interface where you want to capture DHCP packets.")
 
 var dhcpPacketCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Name: "dhcp_packets",
 	Help: "Number of DHCP packets captured, partitioned by source MAC addresses",
-}, []string{"SrcMAC"})
+}, []string{"SrcMAC", "OptionSubnetMask", "OptionRouter"})
 
 func init() {
 	flag.Parse()
@@ -73,13 +79,21 @@ func checkPacket(packet *gopacket.Packet) {
 
 	ethernet := ethLayer.(*layers.Ethernet)
 	p := (*packet).Data()
-	log.Println(ethernet.SrcMAC.String())
 	if 0x11C <= len(p) &&
 		p[0x11A] == byte(53) &&
-		(p[0x11C] == DHCPOFFER ||
-			p[0x11C] == DHCPACK ||
-			p[0x11C] == DHCPNAK) {
-		dhcpPacketCount.WithLabelValues(ethernet.SrcMAC.String()).Inc()
+		(p[0x11C] == DHCPOFFER) {
+		var SrcMAC, OptionSubnetMask, OptionRouter string
+		SrcMAC = ethernet.SrcMAC.String()
+		for i, length := 0x11A, int(p[0x11B]); i+length+2 < len(p) && p[i] != 0; i += length + 2 {
+			length = int(p[i+1])
+			switch p[i] {
+			case OPTION_SUBNETMASK:
+				OptionSubnetMask = fmt.Sprint(p[i+2 : i+2+length])
+			case OPTION_ROUTER:
+				OptionRouter = fmt.Sprint(p[i+2 : i+2+length])
+			}
+		}
+		dhcpPacketCount.WithLabelValues(SrcMAC, OptionSubnetMask, OptionRouter).Inc()
 		log.Println("DHCP packet:", ethernet.SrcMAC.String())
 	}
 
