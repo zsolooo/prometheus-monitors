@@ -9,6 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"log"
 	"net/http"
+	"runtime/pprof"
 )
 
 const (
@@ -30,6 +31,7 @@ const (
 
 var addr = flag.String("listen-address", ":8080", "The address to listen on for HTTP requests.")
 var iface = flag.String("interface", "eth0", "The interface where you want to capture DHCP packets.")
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 var dhcpPacketCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Name: "dhcp_packets",
@@ -42,6 +44,15 @@ func init() {
 }
 
 func main() {
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+
 	log.Println("Opening live capture on", *iface)
 	handle, err := pcap.OpenLive(*iface, 1600, true, pcap.BlockForever)
 	if err != nil {
